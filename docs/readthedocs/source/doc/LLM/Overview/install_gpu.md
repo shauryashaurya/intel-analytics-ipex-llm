@@ -22,10 +22,10 @@ To apply Intel GPU acceleration, there're several prerequisite steps for tools i
 
 * Step 4: Install Intel® oneAPI Base Toolkit 2024.0:
 
-  First, Create a Python 3.9 enviroment and activate it. In Anaconda Prompt:
+  First, Create a Python 3.11 enviroment and activate it. In Anaconda Prompt:
 
   ```cmd
-  conda create -n llm python=3.9 libuv
+  conda create -n llm python=3.11 libuv
 
   conda activate llm
   ```
@@ -33,7 +33,7 @@ To apply Intel GPU acceleration, there're several prerequisite steps for tools i
   ```eval_rst
   .. important::
 
-     ``ipex-llm`` is tested with Python 3.9, 3.10 and 3.11. Python 3.9 is recommended for best practices.
+     ``ipex-llm`` is tested with Python 3.9, 3.10 and 3.11. Python 3.11 is recommended for best practices.
   ```
 
   Then, use `pip` to install the Intel oneAPI Base Toolkit 2024.0:
@@ -93,17 +93,17 @@ If you encounter network issues when installing IPEX, you can also install IPEX-
 Download the wheels on Windows system:
 
 ```
-wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torch-2.1.0a0%2Bcxx11.abi-cp39-cp39-win_amd64.whl
-wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torchvision-0.16.0a0%2Bcxx11.abi-cp39-cp39-win_amd64.whl
-wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/intel_extension_for_pytorch-2.1.10%2Bxpu-cp39-cp39-win_amd64.whl
+wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torch-2.1.0a0%2Bcxx11.abi-cp311-cp311-win_amd64.whl
+wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torchvision-0.16.0a0%2Bcxx11.abi-cp311-cp311-win_amd64.whl
+wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/intel_extension_for_pytorch-2.1.10%2Bxpu-cp311-cp311-win_amd64.whl
 ```
 
 You may install dependencies directly from the wheel archives and then install `ipex-llm` using following commands:
 
 ```
-pip install torch-2.1.0a0+cxx11.abi-cp39-cp39-win_amd64.whl
-pip install torchvision-0.16.0a0+cxx11.abi-cp39-cp39-win_amd64.whl
-pip install intel_extension_for_pytorch-2.1.10+xpu-cp39-cp39-win_amd64.whl
+pip install torch-2.1.0a0+cxx11.abi-cp311-cp311-win_amd64.whl
+pip install torchvision-0.16.0a0+cxx11.abi-cp311-cp311-win_amd64.whl
+pip install intel_extension_for_pytorch-2.1.10+xpu-cp311-cp311-win_amd64.whl
 
 pip install --pre --upgrade ipex-llm[xpu]
 ```
@@ -111,7 +111,7 @@ pip install --pre --upgrade ipex-llm[xpu]
 ```eval_rst
 .. note::
 
-   All the wheel packages mentioned here are for Python 3.9. If you would like to use Python 3.10 or 3.11, you should modify the wheel names for ``torch``, ``torchvision``, and ``intel_extension_for_pytorch`` by replacing ``cp39`` with ``cp310`` or ``cp311``, respectively.
+   All the wheel packages mentioned here are for Python 3.11. If you would like to use Python 3.9 or 3.10, you should modify the wheel names for ``torch``, ``torchvision``, and ``intel_extension_for_pytorch`` by replacing ``cp11`` with ``cp39`` or ``cp310``, respectively.
 ```
 
 ### Runtime Configuration
@@ -135,15 +135,11 @@ Please also set the following environment variable if you would like to run LLMs
          set SYCL_CACHE_PERSISTENT=1
          set BIGDL_LLM_XMX_DISABLED=1
 
-   .. tab:: Intel Arc™ A300-Series or Pro A60
+   .. tab:: Intel Arc™ A-Series Graphics
 
       .. code-block:: cmd
 
          set SYCL_CACHE_PERSISTENT=1
-
-   .. tab:: Other Intel dGPU Series
-
-      There is no need to set further environment variables.
 ```
 
 ```eval_rst
@@ -164,7 +160,7 @@ If you met error when importing `intel_extension_for_pytorch`, please ensure tha
 
 * Ensure that `libuv` is installed in your conda environment. This can be done during the creation of the environment with the command:
   ```cmd
-  conda create -n llm python=3.9 libuv
+  conda create -n llm python=3.11 libuv
   ```
   If you missed `libuv`, you can add it to your existing environment through
   ```cmd
@@ -219,6 +215,51 @@ IPEX-LLM GPU support on Linux has been verified on:
       Intel® oneAPI Base Toolkit 2024.0 installation methods:
 
       .. tabs::
+
+         .. tab:: APT installer
+
+            Step 1: Set up repository
+
+            .. code-block:: bash
+
+               wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+               echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+               sudo apt update
+
+            Step 2: Install the package
+
+            .. code-block:: bash
+
+               sudo apt install intel-oneapi-common-vars=2024.0.0-49406 \
+                  intel-oneapi-common-oneapi-vars=2024.0.0-49406 \
+                  intel-oneapi-diagnostics-utility=2024.0.0-49093 \
+                  intel-oneapi-compiler-dpcpp-cpp=2024.0.2-49895 \
+                  intel-oneapi-dpcpp-ct=2024.0.0-49381 \
+                  intel-oneapi-mkl=2024.0.0-49656 \
+                  intel-oneapi-mkl-devel=2024.0.0-49656 \
+                  intel-oneapi-mpi=2021.11.0-49493 \
+                  intel-oneapi-mpi-devel=2021.11.0-49493 \
+                  intel-oneapi-dal=2024.0.1-25 \
+                  intel-oneapi-dal-devel=2024.0.1-25 \
+                  intel-oneapi-ippcp=2021.9.1-5 \
+                  intel-oneapi-ippcp-devel=2021.9.1-5 \
+                  intel-oneapi-ipp=2021.10.1-13 \
+                  intel-oneapi-ipp-devel=2021.10.1-13 \
+                  intel-oneapi-tlt=2024.0.0-352 \
+                  intel-oneapi-ccl=2021.11.2-5 \
+                  intel-oneapi-ccl-devel=2021.11.2-5 \
+                  intel-oneapi-dnnl-devel=2024.0.0-49521 \
+                  intel-oneapi-dnnl=2024.0.0-49521 \
+                  intel-oneapi-tcm-1.0=1.0.0-435
+
+            .. note::
+
+               You can uninstall the package by running the following command:
+
+               .. code-block:: bash
+               
+                  sudo apt autoremove intel-oneapi-common-vars
+
          .. tab:: PIP installer
 
             Step 1: Install oneAPI in a user-defined folder, e.g., ``~/intel/oneapi``.
@@ -251,30 +292,6 @@ IPEX-LLM GPU support on Linux has been verified on:
                
                   rm -r ~/intel/oneapi
                   conda env config vars unset LD_LIBRARY_PATH -n llm
-
-         .. tab:: APT installer
-
-            Step 1: Set up repository
-
-            .. code-block:: bash
-
-               wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-               echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-               sudo apt update
-
-            Step 2: Install the package
-
-            .. code-block:: bash
-
-               sudo apt install -y intel-basekit=2024.0.1-43
-
-            .. note::
-
-               You can uninstall the package by running the following command:
-
-               .. code-block:: bash
-               
-                  sudo apt autoremove intel-basekit
 
          .. tab:: Offline installer
          
@@ -312,6 +329,38 @@ IPEX-LLM GPU support on Linux has been verified on:
       Intel® oneAPI Base Toolkit 2023.2 installation methods:
 
       .. tabs::
+         .. tab:: APT installer
+
+            Step 1: Set up repository
+
+            .. code-block:: bash
+
+               wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+               echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+               sudo apt update
+
+            Step 2: Install the packages
+
+            .. code-block:: bash
+
+               sudo apt install -y intel-oneapi-common-vars=2023.2.0-49462 \
+                  intel-oneapi-compiler-cpp-eclipse-cfg=2023.2.0-49495 intel-oneapi-compiler-dpcpp-eclipse-cfg=2023.2.0-49495 \
+                  intel-oneapi-diagnostics-utility=2022.4.0-49091 \
+                  intel-oneapi-compiler-dpcpp-cpp=2023.2.0-49495 \
+                  intel-oneapi-mkl=2023.2.0-49495 intel-oneapi-mkl-devel=2023.2.0-49495 \
+                  intel-oneapi-mpi=2021.10.0-49371 intel-oneapi-mpi-devel=2021.10.0-49371 \
+                  intel-oneapi-tbb=2021.10.0-49541 intel-oneapi-tbb-devel=2021.10.0-49541\
+                  intel-oneapi-ccl=2021.10.0-49084 intel-oneapi-ccl-devel=2021.10.0-49084\
+                  intel-oneapi-dnnl-devel=2023.2.0-49516 intel-oneapi-dnnl=2023.2.0-49516
+
+            .. note::
+
+               You can uninstall the package by running the following command:
+
+               .. code-block:: bash
+               
+                  sudo apt autoremove intel-oneapi-common-vars
+
          .. tab:: PIP installer
 
             Step 1: Install oneAPI in a user-defined folder, e.g., ``~/intel/oneapi``
@@ -345,38 +394,6 @@ IPEX-LLM GPU support on Linux has been verified on:
                   rm -r ~/intel/oneapi
                   conda env config vars unset LD_LIBRARY_PATH -n llm
 
-         .. tab:: APT installer
-
-            Step 1: Set up repository
-
-            .. code-block:: bash
-
-               wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-               echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-               sudo apt update
-
-            Step 2: Install the packages
-
-            .. code-block:: bash
-
-               sudo apt install -y intel-oneapi-common-vars=2023.2.0-49462 \
-                  intel-oneapi-compiler-cpp-eclipse-cfg=2023.2.0-49495 intel-oneapi-compiler-dpcpp-eclipse-cfg=2023.2.0-49495 \
-                  intel-oneapi-diagnostics-utility=2022.4.0-49091 \
-                  intel-oneapi-compiler-dpcpp-cpp=2023.2.0-49495 \
-                  intel-oneapi-mkl=2023.2.0-49495 intel-oneapi-mkl-devel=2023.2.0-49495 \
-                  intel-oneapi-mpi=2021.10.0-49371 intel-oneapi-mpi-devel=2021.10.0-49371 \
-                  intel-oneapi-tbb=2021.10.0-49541 intel-oneapi-tbb-devel=2021.10.0-49541\
-                  intel-oneapi-ccl=2021.10.0-49084 intel-oneapi-ccl-devel=2021.10.0-49084\
-                  intel-oneapi-dnnl-devel=2023.2.0-49516 intel-oneapi-dnnl=2023.2.0-49516
-
-            .. note::
-
-               You can uninstall the package by running the following command:
-
-               .. code-block:: bash
-               
-                  sudo apt autoremove intel-oneapi-common-vars
-
          .. tab:: Offline installer
          
             Using the offline installer allows you to customize the installation path.
@@ -399,12 +416,12 @@ IPEX-LLM GPU support on Linux has been verified on:
 ### Install IPEX-LLM
 #### Install IPEX-LLM From PyPI
 
-We recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) to create a python 3.9 enviroment:
+We recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) to create a python 3.11 enviroment:
 
 ```eval_rst
 .. important::
 
-   ``ipex-llm`` is tested with Python 3.9, 3.10 and 3.11. Python 3.9 is recommended for best practices.
+   ``ipex-llm`` is tested with Python 3.9, 3.10 and 3.11. Python 3.11 is recommended for best practices.
 ```
 
 ```eval_rst
@@ -422,7 +439,7 @@ We recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) t
 
             .. code-block:: bash
 
-               conda create -n llm python=3.9
+               conda create -n llm python=3.11
                conda activate llm
 
                pip install --pre --upgrade ipex-llm[xpu] --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
@@ -439,7 +456,7 @@ We recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) t
 
             .. code-block:: bash
 
-               conda create -n llm python=3.9
+               conda create -n llm python=3.11
                conda activate llm
 
                pip install --pre --upgrade ipex-llm[xpu] --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/cn/
@@ -461,7 +478,7 @@ We recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) t
 
             .. code-block:: bash
 
-               conda create -n llm python=3.9
+               conda create -n llm python=3.11
                conda activate llm
 
                pip install --pre --upgrade ipex-llm[xpu_2.0] --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
@@ -470,7 +487,7 @@ We recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) t
 
             .. code-block:: bash
 
-               conda create -n llm python=3.9
+               conda create -n llm python=3.11
                conda activate llm
 
                pip install --pre --upgrade ipex-llm[xpu_2.0] --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/cn/
@@ -488,18 +505,18 @@ If you encounter network issues when installing IPEX, you can also install IPEX-
       .. code-block:: bash
 
          # get the wheels on Linux system for IPEX 2.1.10+xpu
-         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torch-2.1.0a0%2Bcxx11.abi-cp39-cp39-linux_x86_64.whl
-         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torchvision-0.16.0a0%2Bcxx11.abi-cp39-cp39-linux_x86_64.whl
-         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/intel_extension_for_pytorch-2.1.10%2Bxpu-cp39-cp39-linux_x86_64.whl
+         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torch-2.1.0a0%2Bcxx11.abi-cp311-cp311-linux_x86_64.whl
+         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torchvision-0.16.0a0%2Bcxx11.abi-cp311-cp311-linux_x86_64.whl
+         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/intel_extension_for_pytorch-2.1.10%2Bxpu-cp311-cp311-linux_x86_64.whl
 
       Then you may install directly from the wheel archives using following commands:
 
       .. code-block:: bash
 
          # install the packages from the wheels
-         pip install torch-2.1.0a0+cxx11.abi-cp39-cp39-linux_x86_64.whl
-         pip install torchvision-0.16.0a0+cxx11.abi-cp39-cp39-linux_x86_64.whl
-         pip install intel_extension_for_pytorch-2.1.10+xpu-cp39-cp39-linux_x86_64.whl
+         pip install torch-2.1.0a0+cxx11.abi-cp311-cp311-linux_x86_64.whl
+         pip install torchvision-0.16.0a0+cxx11.abi-cp311-cp311-linux_x86_64.whl
+         pip install intel_extension_for_pytorch-2.1.10+xpu-cp311-cp311-linux_x86_64.whl
 
          # install ipex-llm for Intel GPU
          pip install --pre --upgrade ipex-llm[xpu]
@@ -509,18 +526,18 @@ If you encounter network issues when installing IPEX, you can also install IPEX-
       .. code-block:: bash
 
          # get the wheels on Linux system for IPEX 2.0.110+xpu
-         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torch-2.0.1a0%2Bcxx11.abi-cp39-cp39-linux_x86_64.whl
-         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torchvision-0.15.2a0%2Bcxx11.abi-cp39-cp39-linux_x86_64.whl
-         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/intel_extension_for_pytorch-2.0.110%2Bxpu-cp39-cp39-linux_x86_64.whl
+         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torch-2.0.1a0%2Bcxx11.abi-cp311-cp311-linux_x86_64.whl
+         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/torchvision-0.15.2a0%2Bcxx11.abi-cp311-cp311-linux_x86_64.whl
+         wget https://intel-extension-for-pytorch.s3.amazonaws.com/ipex_stable/xpu/intel_extension_for_pytorch-2.0.110%2Bxpu-cp311-cp311-linux_x86_64.whl
 
       Then you may install directly from the wheel archives using following commands:
 
       .. code-block:: bash
 
          # install the packages from the wheels
-         pip install torch-2.0.1a0+cxx11.abi-cp39-cp39-linux_x86_64.whl
-         pip install torchvision-0.15.2a0+cxx11.abi-cp39-cp39-linux_x86_64.whl
-         pip install intel_extension_for_pytorch-2.0.110+xpu-cp39-cp39-linux_x86_64.whl
+         pip install torch-2.0.1a0+cxx11.abi-cp311-cp311-linux_x86_64.whl
+         pip install torchvision-0.15.2a0+cxx11.abi-cp311-cp311-linux_x86_64.whl
+         pip install intel_extension_for_pytorch-2.0.110+xpu-cp311-cp311-linux_x86_64.whl
 
          # install ipex-llm for Intel GPU
          pip install --pre --upgrade ipex-llm[xpu_2.0]
@@ -530,7 +547,7 @@ If you encounter network issues when installing IPEX, you can also install IPEX-
 ```eval_rst
 .. note::
 
-   All the wheel packages mentioned here are for Python 3.9. If you would like to use Python 3.10 or 3.11, you should modify the wheel names for ``torch``, ``torchvision``, and ``intel_extension_for_pytorch`` by replacing ``cp39`` with ``cp310`` or ``cp311``, respectively.
+   All the wheel packages mentioned here are for Python 3.11. If you would like to use Python 3.9 or 3.10, you should modify the wheel names for ``torch``, ``torchvision``, and ``intel_extension_for_pytorch`` by replacing ``cp11`` with ``cp39`` or ``cp310``, respectively.
 ```
 
 ### Runtime Configuration
@@ -572,6 +589,23 @@ To use GPU acceleration on Linux, several environment variables are required or 
 
       Please note that ``libtcmalloc.so`` can be installed by ``conda install -c conda-forge -y gperftools=2.10``
 
+   .. tab:: Intel iGPU
+
+      .. code-block:: bash
+
+         # Configure oneAPI environment variables. Required step for APT or offline installed oneAPI.
+         # Skip this step for PIP-installed oneAPI since the environment has already been configured in LD_LIBRARY_PATH.
+         source /opt/intel/oneapi/setvars.sh
+
+         export SYCL_CACHE_PERSISTENT=1
+         export BIGDL_LLM_XMX_DISABLED=1
+
+```
+
+```eval_rst
+.. note::
+
+   For **the first time** that **each model** runs on Intel iGPU/Intel Arc™ A300-Series or Pro A60, it may take several minutes to compile.
 ```
 
 ### Known issues

@@ -10,11 +10,15 @@ In the example [generate.py](./generate.py), we show a basic use case for a Qwen
 ### 1. Install
 We suggest using conda to manage environment:
 ```bash
-conda create -n llm python=3.9
+conda create -n llm python=3.11
 conda activate llm
 
 pip install --pre --upgrade ipex-llm[all] # install ipex-llm with 'all' option
 pip install transformers==4.37.0 # install the transformers which support Qwen2
+
+# only for Qwen1.5-MoE-A2.7B
+pip install transformers==4.40.0
+pip install trl==0.8.1
 ```
 
 ### 2. Run

@@ -119,7 +119,7 @@ class _BaseAutoModelClass:
                                 ``'sym_int5'``, ``'asym_int5'``, ``'sym_int8'``, ``'nf3'``,
                                 ``'nf4'``, ``'fp4'``, ``'fp8'``, ``'fp8_e4m3'``, ``'fp8_e5m2'``,
                                 ``'gguf_iq2_xxs'``, ``'gguf_iq2_xs'``, gguf_iq1_s'``,
-                                ``'fp16'`` or ``'bf16'``,
+                                ``'fp16'``, ``'bf16'``, ``'q4_k'`` or ``'q6_k'``,
                                 ``'sym_int4'`` means symmetric int 4, ``'asym_int4'`` means
                                 asymmetric int 4, ``'nf4'`` means 4-bit NormalFloat, etc.
                                 Relevant low bit optimizations will be applied to the model.
@@ -140,6 +140,9 @@ class _BaseAutoModelClass:
             specify the model hub. Default to be ``'huggingface'``.
         :param embedding_qtype: str value, options are ``'q2_k'`` now. Default to be None.
             Relevant low bit optimizations will be applied to nn.Embedding layer.
+        :param mixed_precision: boolean value, Whether to use mixed precision quantization.
+            Default to be False. If set to True, we will use sym_int8 for lm_head when
+            load_in_low_bit is sym_int4 or asym_int4.
         :return: a model instance
         """
         pretrained_model_name_or_path = kwargs.get("pretrained_model_name_or_path", None) \
@@ -240,8 +243,6 @@ class _BaseAutoModelClass:
                 if q_config["quant_method"] == "gptq":
                     invalidInputError(q_config["bits"] == 4,
                                       "Only 4-bit gptq is supported in bigdl-llm.")
-                    invalidInputError(q_config["desc_act"] is False,
-                                      "Only desc_act=False is supported in bigdl-llm.")
                     if load_in_low_bit is not None:
                         invalidInputError(load_in_low_bit == "asym_int4",
                                           "You can only load gptq model as aysm_int4 low bit type.")
@@ -295,6 +296,15 @@ class _BaseAutoModelClass:
                     )
                 else:
                     kwargs["torch_dtype"] = torch.float16
+            elif load_in_low_bit == "bf16":
+                if torch_dtype is not None and torch_dtype != torch.bfloat16:
+                    invalidInputError(
+                        False,
+                        f"Please use torch_dtype=torch.bfloat16"
+                        f" when setting load_in_low_bit='bf16'."
+                    )
+                else:
+                    kwargs["torch_dtype"] = torch.bfloat16
             else:
                 kwargs["torch_dtype"] = torch_dtype or "auto"
             # Avoid tensor parallel F.Linear Operations
@@ -321,7 +331,8 @@ class _BaseAutoModelClass:
             model = cls.load_convert(q_k, optimize_model, *args, **kwargs)
 
             if speculative:
-                from .speculative import speculative_generate, clear_benchmarks
+                from .speculative import speculative_generate, clear_benchmarks,\
+                    _crop_past_key_values
                 # load a sym_int4 model as draft model
                 draft_model = cls.load_convert('sym_int4', optimize_model, *args, **kwargs)
                 model.draft_model = draft_model
@@ -329,6 +340,12 @@ class _BaseAutoModelClass:
                 # add speculative_generate to pretrained model dynamically
                 model.clear_benchmarks = types.MethodType(clear_benchmarks, model)
                 model.speculative_generate = types.MethodType(speculative_generate, model)
+                model._crop_past_key_values = types.MethodType(_crop_past_key_values, model)
+
+            # add lookup_generate to pretrained model
+            from .lookup import lookup_generate
+            import types
+            model.lookup_generate = types.MethodType(lookup_generate, model)
         else:
             # load default
             model = cls.HF_Model.from_pretrained(*args, **kwargs)
@@ -362,7 +379,7 @@ class _BaseAutoModelClass:
                           f"Unknown load_in_low_bit value: {q_k}, expected:"
                           f" sym_int4, asym_int4, sym_int5, asym_int5, sym_int8, nf3, nf4, "
                           f"fp4, fp8, fp8_e4m3, fp8_e5m2, fp16,  bf16, gguf_iq2_xxs, "
-                          f"gguf_iq2_xs, gguf_iq1_s, mixed_fp4 or mixed_fp8.")
+                          f"gguf_iq2_xs, gguf_iq1_s, q2_k, q4_k, q6_k, mixed_fp4 or mixed_fp8.")
         qtype = ggml_tensor_qtype[q_k]
 
         # In case it needs a second try,
@@ -378,6 +395,7 @@ class _BaseAutoModelClass:
         quant_config = kwargs.pop("quantization_config", None)
         imatrix_data = kwargs.pop("imatrix_data", None)
         embedding_qtype = kwargs.pop("embedding_qtype", None)
+        mixed_precision = kwargs.pop("mixed_precision", False)
         if embedding_qtype is not None:
             embedding_qtype = ggml_tensor_qtype[embedding_qtype]
         enable_xetla = kwargs.pop("enable_xetla", False)
@@ -428,6 +446,8 @@ class _BaseAutoModelClass:
                 offload_dir=None
             )
         else:
+            if quant_config is not None:
+                kwargs["quantization_config"] = quant_config
             _load_pre()
             try:
                 # To handle the input CUDA setting (such as 'device_map={"":0}'), ignore it
@@ -447,7 +467,8 @@ class _BaseAutoModelClass:
                                      torch_dtype=kwargs.get("torch_dtype", 'auto'),
                                      imatrix_data=imatrix_data,
                                      embedding_qtype=embedding_qtype,
-                                     enable_xetla=enable_xetla,)
+                                     enable_xetla=enable_xetla,
+                                     mixed_precision=mixed_precision)
         model.config.update({"bigdl_transformers_low_bit": q_k})
 
         # enable tie_word_embeddings for MPT

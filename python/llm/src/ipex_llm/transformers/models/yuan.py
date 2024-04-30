@@ -35,15 +35,10 @@ from ipex_llm.transformers.models.utils import init_kv_cache, extend_kv_cache, a
 from ipex_llm.transformers.models.utils import init_fp8_kv_cache, append_fp8_kv_cache, \
     restore_fp8_kv_cache, use_quantize_kv_cache
 from ipex_llm.transformers.models.utils import is_enough_kv_cache_room_4_31, SILU
-from ipex_llm.transformers.low_bit_linear import SYM_INT4, FP8E5
-from ipex_llm.transformers.models.utils import decoding_fast_path_qtype_check
 
-KV_CACHE_ALLOC_BLOCK_LENGTH = 256
+import os
 
-
-def use_decoding_fast_path(proj, use_fuse_rope, enough_kv_room, bs):
-    return decoding_fast_path_qtype_check(proj) and \
-        use_fuse_rope and enough_kv_room and bs == 1
+KV_CACHE_ALLOC_BLOCK_LENGTH = int(os.environ.get("KV_CACHE_ALLOC_BLOCK_LENGTH", 256))
 
 
 def should_use_fuse_rope(self, hidden_states, position_ids):
@@ -298,8 +293,7 @@ def yuan_attention_forward_quantized(
             attn_output = torch.matmul(attn_weights, value_states)
         else:
             import linear_q4_0
-            attn_output = linear_q4_0.attn_value_fp8_matmul(attn_weights,
-                                                            value_states.transpose(-1, -2))
+            attn_output = linear_q4_0.attn_value_fp8_matmul(attn_weights, value_states)
 
         invalidInputError(attn_output.size() == (bsz, self.num_heads, q_len, self.head_dim),
                           "`attn_output` should be of size "

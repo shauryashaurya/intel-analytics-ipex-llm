@@ -57,7 +57,7 @@ Visit [Miniconda installation page](https://docs.anaconda.com/free/miniconda/), 
 
 Open the **Anaconda Prompt**. Then create a new python environment `llm` and activate it:
 ```cmd
-conda create -n llm python=3.9 libuv
+conda create -n llm python=3.11 libuv
 conda activate llm
 ```
 
@@ -117,13 +117,15 @@ You can verify if `ipex-llm` is successfully installed following below steps.
   
      .. tab:: Intel Arc™ A770
   
-        There is no need to set further environment variables.
+        .. code-block:: cmd
+  
+           set SYCL_CACHE_PERSISTENT=1
   ```
   
   ```eval_rst
   .. seealso::
 
-     For other Intel dGPU Series, please refer to `this guide <https://ipex-llm.readthedocs.io/en/latest/doc/LLM/Overview/install_gpu.html#runtime-configuration>`_ for more details regarding runtime configuration.
+     For other Intel dGPU Series, please refer to `this guide <../Overview/install_gpu.html#runtime-configuration>`_ for more details regarding runtime configuration.
   ```
 
 ### Step 2: Run Python Code

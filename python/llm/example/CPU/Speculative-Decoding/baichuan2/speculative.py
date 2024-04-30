@@ -43,7 +43,7 @@ if __name__ == '__main__':
                         help='Prompt to infer')
     parser.add_argument('--precision', type=str, default='bf16',
                         help='Main model Precision')
-    parser.add_argument('--n_predict', type=int, default=128,
+    parser.add_argument('--n-predict', type=int, default=128,
                         help='Max tokens to predict')
     parser.add_argument('--max-draft', type=int, default=8,
                         help='Max draft')
@@ -59,7 +59,6 @@ if __name__ == '__main__':
                                                  optimize_model=True,
                                                  torch_dtype=torch.bfloat16,
                                                  load_in_low_bit="bf16",
-                                                 torchscript=True,
                                                  speculative=True,
                                                  trust_remote_code=True,
                                                  use_cache=True)
@@ -70,6 +69,8 @@ if __name__ == '__main__':
         prompt = BAICHUAN_PROMPT_FORMAT.format(prompt=args.prompt)
         inputs = tokenizer(prompt, return_tensors='pt', padding=True)
         input_ids = inputs.input_ids.to(model.device)
+        actual_in_len = input_ids.shape[1]
+        print("actual input_ids length:" + str(actual_in_len))
         attention_mask = inputs.attention_mask.to(model.device)
 
         # warmup
@@ -89,8 +90,14 @@ if __name__ == '__main__':
                                 do_sample=False)
         output_str = tokenizer.decode(output[0], skip_special_tokens=True)
         end = time.perf_counter()
-
-        print(output_str)
-        print(f"Tokens generated {model.n_token_generated}")
+        
         print(f"E2E Generation time {(end - st):.4f}s")
-        print(f"First token latency {model.first_token_time:.4f}s")
+        print(output_str)
+
+        # When the IPEX_CPU optimized models recive short prompts(length < 256)
+        # it will use normal generate() and has not these attr
+        from ipex_llm.transformers.convert import get_enable_ipex
+        _enable_ipex = get_enable_ipex()
+        if not _enable_ipex or actual_in_len >= 256:
+            print(f"Tokens generated {model.n_token_generated}")
+            print(f"First token latency {model.first_token_time:.4f}s")

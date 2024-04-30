@@ -1,6 +1,8 @@
 # Run Text Generation WebUI on Intel GPU
 
-The [oobabooga/text-generation-webui](https://github.com/oobabooga/text-generation-webui) provides a user friendly GUI for anyone to run LLM locally; by porting it to [`ipex-llm`](https://github.com/intel-analytics/ipex-llm), users can now easily run LLM in [Text Generation WebUI](https://github.com/intel-analytics/text-generation-webui) on Intel GPU (e.g., local PC with iGPU, discrete GPU such as Arc, Flex and Max); see the demo of running LLaMA2-7B on an Intel Core Ultra laptop below.
+The [oobabooga/text-generation-webui](https://github.com/oobabooga/text-generation-webui) provides a user friendly GUI for anyone to run LLM locally; by porting it to [`ipex-llm`](https://github.com/intel-analytics/ipex-llm), users can now easily run LLM in [Text Generation WebUI](https://github.com/intel-analytics/text-generation-webui) on Intel **GPU** *(e.g., local PC with iGPU, discrete GPU such as Arc, Flex and Max)*.
+
+See the demo of running LLaMA2-7B on an Intel Core Ultra laptop below.
 
 <video src="https://llm-assets.readthedocs.io/en/latest/_images/webui-mtl.mp4" width="100%" controls></video>
 
@@ -53,15 +55,14 @@ Configure oneAPI variables by running the following command in **Anaconda Prompt
 ```eval_rst
 .. note::
    
-   For more details about runtime configurations, `refer to this guide <https://ipex-llm.readthedocs.io/en/latest/doc/LLM/Overview/install_gpu.html#runtime-configuration>`_ 
+   For more details about runtime configurations, refer to `this guide <https://ipex-llm.readthedocs.io/en/latest/doc/LLM/Overview/install_gpu.html#runtime-configuration>`_ 
 ```
 
 ```cmd
-call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+set SYCL_CACHE_PERSISTENT=1
 ```
 If you're running on iGPU, set additional environment variables by running the following commands:
 ```cmd
-set SYCL_CACHE_PERSISTENT=1
 set BIGDL_LLM_XMX_DISABLED=1
 ```
 

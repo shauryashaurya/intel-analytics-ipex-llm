@@ -39,6 +39,7 @@ import time
 from transformers import AutoModelForCausalLM
 from llava.model.language_model.llava_llama import LlavaLlamaForCausalLM
 from transformers import AutoTokenizer
+from transformers import TextStreamer
 
 from llava.constants import (
     DEFAULT_IMAGE_PATCH_TOKEN,
@@ -291,7 +292,7 @@ if __name__ == '__main__':
                                                                  model_base=None,
                                                                  model_name=model_name)
 
-    # With only one line to enable BigDL-LLM optimization on model
+    # With only one line to enable IPEX-LLM optimization on model
     # When running LLMs on Intel iGPUs for Windows users, we recommend setting `cpu_embedding=True` in the optimize_model function.
     # This will allow the memory-intensive embedding layer to utilize the CPU instead of iGPU.
     model = optimize_model(model).to('xpu')
@@ -312,11 +313,14 @@ if __name__ == '__main__':
             print("exit...")
             break
 
+        print(f"{roles[1]}: ", end="")
+
         prompt = get_prompt(model.config.mm_use_im_start_end, first_round, conv, user_input)
         first_round = False
         input_ids = tokenizer_image_token(
             prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to('xpu')
         stopping_criteria = get_stopping_criteria(conv, tokenizer, input_ids)
+        streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
         # Generate predicted tokens
         with torch.inference_mode():
@@ -326,13 +330,11 @@ if __name__ == '__main__':
                 images=image_tensor,
                 do_sample=True,
                 max_new_tokens=args.n_predict,
+                streamer=streamer,
                 use_cache=True,
                 stopping_criteria=[stopping_criteria])
             end = time.time()
             #print(f'Inference time: {end-st} s')
 
-        outputs = tokenizer.decode(
-            output_ids[0, input_ids.shape[1]:].cpu(), skip_special_tokens=True).strip()
+        outputs = tokenizer.decode(output_ids[0, :].cpu(), skip_special_tokens=True).strip()
         conv.messages[-1][-1] = outputs
-        print(f"{roles[1]}: ", end="")
-        print(outputs)

@@ -42,8 +42,9 @@ from ipex_llm.transformers.models.utils import init_fp8_kv_cache, append_fp8_kv_
 from ipex_llm.transformers.models.utils import rotate_half, SILU
 from ipex_llm.transformers.models.utils import mlp_fusion_check
 from ipex_llm.transformers.models.utils import apply_rotary_pos_emb_cache_freq_xpu
-from ipex_llm.transformers.models.utils import use_flash_attention, use_esimd_sdp
-from ipex_llm.transformers.models.utils import decoding_fast_path_qtype_check
+from ipex_llm.transformers.models.utils import use_flash_attention, use_new_esimd_sdp_fp16, \
+    use_sdp_fp8
+from ipex_llm.transformers.models.utils import use_decoding_fast_path
 from ipex_llm.utils.common import invalidInputError, invalidOperationError
 from ipex_llm.ggml.quantize import ggml_tensor_qtype
 from transformers.modeling_outputs import BaseModelOutputWithPast
@@ -54,7 +55,9 @@ flash_attn_unpadded_func = None
 
 logger = logging.get_logger(__name__)
 
-KV_CACHE_ALLOC_BLOCK_LENGTH = 256
+import os
+
+KV_CACHE_ALLOC_BLOCK_LENGTH = int(os.environ.get("KV_CACHE_ALLOC_BLOCK_LENGTH", 256))
 SUPPORT_TORCH2 = hasattr(torch, '__version__') and int(torch.__version__.split(".")[0]) >= 2
 
 
@@ -140,8 +143,10 @@ def qwen_attention_forward_original(
     rotary_pos_emb_list = rotary_pos_emb_list[:-1]
 
     use_fuse_rope = should_use_fuse_rope(self, hidden_states)
-    qtype_check = decoding_fast_path_qtype_check(self.q_proj)
-    decoding_fast_path = (qtype_check and use_fuse_rope and bsz * q_len == 1)
+    decoding_fast_path = use_decoding_fast_path(self.q_proj,
+                                                use_fuse_rope,
+                                                True,
+                                                bsz * q_len)
     if decoding_fast_path:
         hidden_states = hidden_states.view(1, -1)
         cache_k, cache_v = layer_past[0], layer_past[1]
@@ -286,11 +291,9 @@ def qwen_attention_forward_original(
         attn_output = attn_output.transpose(1, 2)
         attn_weights = None
     elif not self.training and not hidden_states.requires_grad and \
-            use_esimd_sdp(q_len, key.shape[2], self.head_dim, query):
-        import linear_fp16_esimd
-        attn_output = linear_fp16_esimd.sdp_forward(query,
-                                                    key,
-                                                    value)
+            use_new_esimd_sdp_fp16(q_len, key.shape[2], self.head_dim, query):
+        import linear_q4_0
+        attn_output = linear_q4_0.sdp_fp16(query, key, value, attention_mask)
         attn_output = attn_output.view(query.shape)
         attn_output = attn_output.transpose(1, 2)
         attn_weight = None
@@ -443,7 +446,7 @@ def qwen_attention_forward_quantized(
             max_cache_length = kv_seq_len + KV_CACHE_ALLOC_BLOCK_LENGTH
             k_cache, v_cache = init_fp8_kv_cache(
                 query.size(0), self.num_heads, kv_seq_len, self.head_dim,
-                device=query.device, new_layout=True
+                device=query.device
             )
             key, value = append_fp8_kv_cache(k_cache, v_cache, key, value)
     else:
@@ -458,7 +461,7 @@ def qwen_attention_forward_quantized(
         v_cache = v_cache.transpose(1, 2)
         # k_cache and v_cache's shape: [bs, num_heads, context_length, head_dim]
 
-        key, value = append_fp8_kv_cache(k_cache, v_cache, key, value, new_layout=True)
+        key, value = append_fp8_kv_cache(k_cache, v_cache, key, value)
 
         attn_output, attn_weight = core_attn(
             self, query, key, value, causal_mask, attention_mask, head_mask
@@ -481,7 +484,7 @@ def qwen_attention_forward_quantized(
 
 
 def core_attn(self, query, key, value, causal_mask=None, attention_mask=None, head_mask=None):
-    if query.size(2) != 1 or query.device.type != 'xpu':
+    if not use_sdp_fp8(query.size(2), key.size(2), query):
         # We have no CPU fp8 matmul implementation for now, so just upscale to fp32
         key, value = restore_fp8_kv_cache(key, value, query.dtype)
         attn_weights = torch.matmul(query, key.transpose(-1, -2))

@@ -180,6 +180,8 @@ def get_xpu_device_type(x):
         return "flex"
     elif name.startswith("Intel(R) Data Center GPU Max"):
         return "pvc"
+    elif name.startswith("Intel(R) UHD"):
+        return "uhd"
     else:
         return "others"
 
@@ -335,3 +337,8 @@ def get_modelscope_hf_config(model_id_or_path: str,
     elif os.path.isfile(model_id_or_path):
         local_path = model_id_or_path
     return Config._file2dict(local_path)
+
+
+def is_torch_bf16_gpu_available():
+    # always true for XPU and CPU
+    return True

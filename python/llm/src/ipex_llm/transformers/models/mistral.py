@@ -52,13 +52,20 @@ from ipex_llm.transformers.models.utils import apply_rotary_pos_emb, \
 from ipex_llm.transformers.models.utils import is_enough_kv_cache_room_4_31, \
     is_enough_kv_cache_room_4_36
 from ipex_llm.transformers.low_bit_linear import SYM_INT4, FP8E5, IQ2_XXS
-from ipex_llm.transformers.models.utils import use_flash_attention, use_esimd_sdp
+from ipex_llm.transformers.models.utils import use_flash_attention, use_new_esimd_sdp_fp16, \
+    use_sdp_fp8
+from ipex_llm.transformers.models.utils import use_decoding_fast_path
 from ipex_llm.transformers.models.llama import llama_decoding_fast_path_qtype_check
+from ipex_llm.transformers.models.llama import should_use_xetla_mm_qkv
+from ipex_llm.transformers.models.llama import fuse_qkv_weight_xetla
 try:
     from transformers.cache_utils import Cache
 except ImportError:
     Cache = Tuple[torch.Tensor]
-KV_CACHE_ALLOC_BLOCK_LENGTH = 256
+
+import os
+
+KV_CACHE_ALLOC_BLOCK_LENGTH = int(os.environ.get("KV_CACHE_ALLOC_BLOCK_LENGTH", 256))
 
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -80,11 +87,6 @@ def should_use_fuse_rope(self, hidden_states, position_ids):
     use_fuse_rope = use_fuse_rope and not (self.training and hidden_states.requires_grad)
     use_fuse_rope = use_fuse_rope and position_ids is not None
     return use_fuse_rope
-
-
-def use_decoding_fast_path(proj, use_fuse_rope, enough_kv_room, bs):
-    return llama_decoding_fast_path_qtype_check(proj) and \
-        use_fuse_rope and enough_kv_room and bs == 1
 
 
 def compute_attn_outputs_weights(query_states, key_states, value_states, bsz, q_len, kv_seq_len,
@@ -117,6 +119,7 @@ def compute_attn_outputs_weights(query_states, key_states, value_states, bsz, q_
 
     if attn_output.size() != (bsz, num_heads, q_len, head_dim):
         invalidInputError(
+            False,
             f"`attn_output` should be of size {(bsz, num_heads, q_len, head_dim)},"
             f" but is {attn_output.size()}"
         )
@@ -296,7 +299,7 @@ def mistral_attention_forward_quantized(
         if use_cache:
             k_cache, v_cache = init_fp8_kv_cache(
                 bsz, self.num_heads, kv_seq_len, self.head_dim,
-                device=query_states.device, new_layout=True
+                device=query_states.device
             )
             key_states, value_states = append_fp8_kv_cache(k_cache, v_cache,
                                                            key_states, value_states)
@@ -304,11 +307,11 @@ def mistral_attention_forward_quantized(
     else:
         k_cache, v_cache = past_key_value
         key_states, value_states = append_fp8_kv_cache(k_cache, v_cache,
-                                                       key_states, value_states, new_layout=True)
+                                                       key_states, value_states)
         kv_seq_len = key_states.shape[-2]
         past_key_value = (key_states, value_states)
 
-        if query_states.size(2) != 1 or query_states.device.type != 'xpu':
+        if not use_sdp_fp8(q_len, key_states.shape[2], query_states):
             key_states, value_states = restore_fp8_kv_cache(key_states, value_states,
                                                             query_states.dtype)
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))
@@ -326,6 +329,7 @@ def mistral_attention_forward_quantized(
             if attention_mask is not None:
                 if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
                     invalidInputError(
+                        False,
                         f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)},"
                         f" but is {attention_mask.size()}"
                     )
@@ -380,7 +384,6 @@ def mistral_attention_forward_original(
                                                 use_fuse_rope,
                                                 enough_kv_room,
                                                 bsz * q_len)
-    decoding_fast_path = decoding_fast_path and not self.q_proj.enable_xetla
 
     if decoding_fast_path:
         hidden_states = hidden_states.view(1, -1)
@@ -400,9 +403,27 @@ def mistral_attention_forward_original(
                                                                          self.head_dim)
         kv_seq_len += 1
     else:
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+
+        if should_use_xetla_mm_qkv(self, device):
+            if not hasattr(self, "qkv_proj_qweight"):
+                self.qkv_proj_qweight = fuse_qkv_weight_xetla(self.q_proj,
+                                                              self.k_proj,
+                                                              self.v_proj,
+                                                              self.q_proj.qtype)
+            import linear_q4_0
+            q_out_len = self.q_proj.out_len
+            k_out_len = self.k_proj.out_len
+            v_out_len = self.v_proj.out_len
+            qkv_states = linear_q4_0.mm_xetla(hidden_states,
+                                              self.qkv_proj_qweight,
+                                              self.q_proj.qtype)
+            query_states = qkv_states[:, :, :q_out_len]
+            key_states = qkv_states[:, :, q_out_len:q_out_len + k_out_len]
+            value_states = qkv_states[:, :, q_out_len + k_out_len:]
+        else:
+            query_states = self.q_proj(hidden_states)
+            key_states = self.k_proj(hidden_states)
+            value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(bsz, q_len,
@@ -470,13 +491,12 @@ def mistral_attention_forward_original(
     else:
         attention_dtype = original_dtype
 
-    # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups).to(device,
-                                                                     dtype=attention_dtype)
-    value_states = repeat_kv(value_states, self.num_key_value_groups).to(device,
-                                                                         dtype=attention_dtype)
-
     if fsdp_flag:
+        # repeat k/v heads if n_kv_heads < n_heads
+        key_states = repeat_kv(key_states, self.num_key_value_groups).to(device,
+                                                                         dtype=attention_dtype)
+        value_states = repeat_kv(value_states, self.num_key_value_groups).to(device,
+                                                                             dtype=attention_dtype)
         attn_output = F.scaled_dot_product_attention(query_states.to(dtype=attention_dtype),
                                                      key_states,
                                                      value_states,
@@ -484,16 +504,20 @@ def mistral_attention_forward_original(
         attn_weights = None
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
-    elif use_esimd_sdp(q_len, key_states.shape[2], self.head_dim, query_states):
-        import linear_fp16_esimd
-        attn_output = linear_fp16_esimd.sdp_forward(query_states,
-                                                    key_states,
-                                                    value_states)
+    elif use_new_esimd_sdp_fp16(q_len, key_states.shape[2], self.head_dim, query_states):
+        # new fp16 sdp doesn't require repeat_kv
+        import linear_q4_0
+        attn_output = linear_q4_0.sdp_fp16(query_states, key_states, value_states, attention_mask)
         attn_output = attn_output.view(query_states.shape)
         attn_weights = None
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
     else:
+        # repeat k/v heads if n_kv_heads < n_heads
+        key_states = repeat_kv(key_states, self.num_key_value_groups).to(device,
+                                                                         dtype=attention_dtype)
+        value_states = repeat_kv(value_states, self.num_key_value_groups).to(device,
+                                                                             dtype=attention_dtype)
         attn_output, attn_weights = compute_attn_outputs_weights(query_states,
                                                                  key_states,
                                                                  value_states,
@@ -656,15 +680,13 @@ def mistral_attention_forward_4_36_quantized(
         if use_cache:
             cache_kwargs = None
             key_states, value_states = past_key_value.update(key_states, value_states,
-                                                             self.layer_idx, cache_kwargs,
-                                                             new_layout=True)
+                                                             self.layer_idx, cache_kwargs)
     else:
         cache_kwargs = None  # Specific to RoPE models
         key_states, value_states = past_key_value.update(key_states, value_states,
-                                                         self.layer_idx, cache_kwargs,
-                                                         new_layout=True)
+                                                         self.layer_idx, cache_kwargs)
         kv_seq_len = key_states.shape[-2]
-        if query_states.size(2) != 1 or query_states.device.type != 'xpu':
+        if not use_sdp_fp8(q_len, key_states.shape[2], query_states):
             key_states, value_states = restore_fp8_kv_cache(key_states, value_states,
                                                             query_states.dtype)
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))
@@ -682,6 +704,7 @@ def mistral_attention_forward_4_36_quantized(
             if attention_mask is not None:
                 if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
                     invalidInputError(
+                        False,
                         f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)},"
                         f" but is {attention_mask.size()}"
                     )
@@ -766,9 +789,26 @@ def mistral_attention_forward_4_36_original(
         past_key_value.value_cache[self.layer_idx] = value_states
 
     else:
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+        if should_use_xetla_mm_qkv(self, device):
+            if not hasattr(self, "qkv_proj_qweight"):
+                self.qkv_proj_qweight = fuse_qkv_weight_xetla(self.q_proj,
+                                                              self.k_proj,
+                                                              self.v_proj,
+                                                              self.q_proj.qtype)
+            import linear_q4_0
+            q_out_len = self.q_proj.out_len
+            k_out_len = self.k_proj.out_len
+            v_out_len = self.v_proj.out_len
+            qkv_states = linear_q4_0.mm_xetla(hidden_states,
+                                              self.qkv_proj_qweight,
+                                              self.q_proj.qtype)
+            query_states = qkv_states[:, :, :q_out_len]
+            key_states = qkv_states[:, :, q_out_len:q_out_len + k_out_len]
+            value_states = qkv_states[:, :, q_out_len + k_out_len:]
+        else:
+            query_states = self.q_proj(hidden_states)
+            key_states = self.k_proj(hidden_states)
+            value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(bsz, q_len,
@@ -842,13 +882,12 @@ def mistral_attention_forward_4_36_original(
     else:
         attention_dtype = original_dtype
 
-    # repeat k/v heads if n_kv_heads < n_heads
-    key_states = repeat_kv(key_states, self.num_key_value_groups).to(device,
-                                                                     dtype=attention_dtype)
-    value_states = repeat_kv(value_states, self.num_key_value_groups).to(device,
-                                                                         dtype=attention_dtype)
-
     if fsdp_flag:
+        # repeat k/v heads if n_kv_heads < n_heads
+        key_states = repeat_kv(key_states, self.num_key_value_groups).to(device,
+                                                                         dtype=attention_dtype)
+        value_states = repeat_kv(value_states, self.num_key_value_groups).to(device,
+                                                                             dtype=attention_dtype)
         attn_output = F.scaled_dot_product_attention(query_states.to(dtype=attention_dtype),
                                                      key_states,
                                                      value_states,
@@ -856,7 +895,20 @@ def mistral_attention_forward_4_36_original(
         attn_weights = None
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
+    elif use_new_esimd_sdp_fp16(q_len, key_states.shape[2], self.head_dim, query_states):
+        # new fp16 sdp doesn't require repeat_kv
+        import linear_q4_0
+        attn_output = linear_q4_0.sdp_fp16(query_states, key_states, value_states, attention_mask)
+        attn_output = attn_output.view(query_states.shape)
+        attn_weights = None
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
     else:
+        # repeat k/v heads if n_kv_heads < n_heads
+        key_states = repeat_kv(key_states, self.num_key_value_groups).to(device,
+                                                                         dtype=attention_dtype)
+        value_states = repeat_kv(value_states, self.num_key_value_groups).to(device,
+                                                                             dtype=attention_dtype)
         attn_output, attn_weights = compute_attn_outputs_weights(query_states,
                                                                  key_states,
                                                                  value_states,

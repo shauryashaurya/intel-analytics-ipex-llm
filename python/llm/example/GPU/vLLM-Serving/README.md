@@ -2,7 +2,14 @@
 
 This example demonstrates how to serve a LLaMA2-7B model using vLLM continuous batching on Intel GPU (with IPEX-LLM low-bits optimizations).
 
-The code shown in the following example is ported from [vLLM](https://github.com/vllm-project/vllm/tree/v0.2.1.post1).
+The code shown in the following example is ported from [vLLM](https://github.com/vllm-project/vllm/tree/v0.3.3).
+
+Currently, we support the following models for vLLM engine:
+
+- Qwen series models
+- Llama series models
+- ChatGLM series models
+- Baichuan series models
 
 ## Example: Serving LLaMA2-7B using Intel GPU
 
@@ -27,21 +34,26 @@ sycl-ls
 
 ### 1. Install
 
-To run vLLM continuous batching on Intel GPUs, install the dependencies as follows:
+Install the dependencies for vLLM as follows:
 
 ```bash
+# This directory may change depends on where you install oneAPI-basekit
+source /opt/intel/oneapi/setvars.sh
 # First create an conda environment
-conda create -n ipex-vllm python==3.9
+conda create -n ipex-vllm python=3.11
 conda activate ipex-vllm
 # Install dependencies
-pip3 install psutil
-pip3 install sentencepiece  # Required for LLaMA tokenizer.
-pip3 install numpy
-# below command will install intel_extension_for_pytorch==2.1.10+xpu as default
 pip install --pre --upgrade "ipex-llm[xpu]" --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
-pip3 install fastapi
-pip3 install "uvicorn[standard]"
-pip3 install "pydantic<2"  # Required for OpenAI server.
+# cd to your workdir
+git clone -b sycl_xpu https://github.com/analytics-zoo/vllm.git
+cd vllm
+pip install -r requirements-xpu.txt
+pip install --no-deps xformers
+VLLM_BUILD_XPU_OPS=1 pip install --no-build-isolation -v -e .
+pip install outlines==0.0.34 --no-deps
+pip install interegular cloudpickle diskcache joblib lark nest-asyncio numba scipy
+# For Qwen model support
+pip install transformers_stream_generator einops tiktoken
 ```
 
 ### 2. Configure recommended environment variables
@@ -50,12 +62,12 @@ pip3 install "pydantic<2"  # Required for OpenAI server.
 export USE_XETLA=OFF
 export SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
 ```
-
 ### 3. Offline inference/Service
 
 #### Offline inference
 
 To run offline inference using vLLM for a quick impression, use the following example:
+
 
 ```bash
 #!/bin/bash
@@ -69,43 +81,95 @@ python offline_inference.py
 
 To fully utilize the continuous batching feature of the `vLLM`, you can send requests to the service using curl or other similar methods.  The requests sent to the engine will be batched at token level. Queries will be executed in the same `forward` step of the LLM and be removed when they are finished instead of waiting for all sequences to be finished.
 
+For vLLM, you can start the service using the following command:
 ```bash
 #!/bin/bash
-# You may also want to adjust the `--max-num-batched-tokens` argument, it indicates the hard limit
-# of batched prompt length the server will accept
+model="YOUR_MODEL_PATH"
+served_model_name="YOUR_MODEL_NAME"
+
+ # You may need to adjust the value of
+ # --max-model-len, --max-num-batched-tokens, --max-num-seqs
+ # to acquire the best performance
+
 python -m ipex_llm.vllm.entrypoints.openai.api_server \
-        --model /MODEL_PATH/Llama-2-7b-chat-hf/ --port 8000  \
-        --load-format 'auto' --device xpu --dtype bfloat16 \
-        --load-in-low-bit sym_int4 \
-        --max-num-batched-tokens 4096
+  --served-model-name $served_model_name \
+  --port 8000 \
+  --model $model \
+  --trust-remote-code \
+  --gpu-memory-utilization 0.75 \
+  --device xpu \
+  --dtype float16 \
+  --enforce-eager \
+  --load-in-low-bit sym_int4 \
+  --max-model-len 4096 \
+  --max-num-batched-tokens 10240 \
+  --max-num-seqs 12 \
+  --tensor-parallel-size 1
 ```
 
-Then you can access the api server as follows:
+You can tune the service using these four arguments:
+1. --gpu-memory-utilization: The fraction of GPU memory to be used for the model executor, which can range from 0 to 1. For example, a value of 0.5 would imply 50% GPU memory utilization. If unspecified, will use the default value of 0.9.
+2. --max-model-len: Model context length. If unspecified, will be automatically derived from the model config.
+3. --max-num-batched-token: Maximum number of batched tokens per iteration.
+4. --max-num-seq: Maximum number of sequences per iteration. Default: 256
+
+
+
+After the service has been booted successfully, you can send a test request using curl. Here, the `YOUR_MODEL` should be set equal to `$served_model_name` in your booting script.
 
 ```bash
-
- curl http://localhost:8000/v1/completions \
-         -H "Content-Type: application/json" \
-         -d '{
-                 "model": "/MODEL_PATH/Llama-2-7b-chat-hf-ipex/",
-                 "prompt": "San Francisco is a",
-                 "max_tokens": 128,
-                 "temperature": 0
+curl http://localhost:8000/v1/completions \
+-H "Content-Type: application/json" \
+-d '{
+        "model": "YOUR_MODEL_NAME",
+        "prompt": "San Francisco is a",
+        "max_tokens": 128,
+        "temperature": 0
  }' &
 ```
 
-### 4. (Optional) Add a new model
+#### Tensor parallel
 
-Currently we have only supported LLaMA family model (including `llama`, `vicuna`, `llama-2`, etc.). To use aother model, you may need add some adaptions.
+> Note: We recommend to use docker for tensor parallel deployment.
 
-#### 4.1 Add model code
+We have also supported tensor parallel by using multiple XPU cards. To enable tensor parallel, you will need to install `libfabric-dev` in your environment.  In ubuntu, you can install it by:
 
-Create or clone the Pytorch model code to `IPEX/python/llm/src/ipex/llm/vllm/model_executor/models`.
+```bash
+sudo apt-get install libfabric-dev
+```
 
-#### 4.2 Rewrite the forward methods
+To deploy your model across multiple cards, simplely change the value of `--tensor-parallel-size` to the desired value.
 
-Refering to `IPEX/python/llm/src/ipex/llm/vllm/model_executor/models/ipex_llama.py`, it's necessary to maintain a `kv_cache`, which is a nested list of dictionary that maps `req_id` to a three-dimensional tensor **(the structure may vary from models)**. Before the model's actual `forward` method, you could prepare a `past_key_values` according to current `req_id`, and after that you need to update the `kv_cache` with `output.past_key_values`. The clearence will be executed when the request is finished.
+For instance, if you have two Arc A770 cards in your environment, then you can set this value to 2. Some OneCCL environment variable settings are also needed, try check the following example:
 
-#### 4.3 Register new model
 
-Finally, register your `*ForCausalLM` class to the _MODEL_REGISTRY in `IPEX/python/llm/src/ipex/llm/vllm/model_executor/model_loader.py`.
+```bash
+#!/bin/bash
+model="YOUR_MODEL_PATH"
+served_model_name="YOUR_MODEL_NAME"
+
+# CCL needed environment variables
+export CCL_WORKER_COUNT=2
+export FI_PROVIDER=shm
+export CCL_ATL_TRANSPORT=ofi
+export CCL_ZE_IPC_EXCHANGE=sockets
+export CCL_ATL_SHM=1
+ # You may need to adjust the value of
+ # --max-model-len, --max-num-batched-tokens, --max-num-seqs
+ # to acquire the best performance
+
+python -m ipex_llm.vllm.entrypoints.openai.api_server \
+  --served-model-name $served_model_name \
+  --port 8000 \
+  --model $model \
+  --trust-remote-code \
+  --gpu-memory-utilization 0.75 \
+  --device xpu \
+  --dtype float16 \
+  --enforce-eager \
+  --load-in-low-bit sym_int4 \
+  --max-model-len 4096 \
+  --max-num-batched-tokens 10240 \
+  --max-num-seqs 12 \
+  --tensor-parallel-size 2
+```

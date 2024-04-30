@@ -28,7 +28,9 @@ from ipex_llm.transformers.models.utils import init_fp8_kv_cache, append_fp8_kv_
 from ipex_llm.transformers.models.utils import use_esimd_sdp
 
 
-KV_CACHE_ALLOC_BLOCK_LENGTH = 256
+import os
+
+KV_CACHE_ALLOC_BLOCK_LENGTH = int(os.environ.get("KV_CACHE_ALLOC_BLOCK_LENGTH", 256))
 KV_CACHE_ALLOC_MIN_LENGTH = 512
 
 
@@ -94,13 +96,24 @@ def repeat_kv(key: torch.Tensor, value: torch.Tensor, n_head: int) -> (torch.Ten
     return key, value
 
 
+def should_split_qkv_tensor(query_layer, bsz, n_head, seq_len):
+    if os.environ.get("IPEX_LLM_SPLIT_QKV", None) is not None:
+        return os.environ.get("IPEX_LLM_SPLIT_QKV", None) == "1"
+    elif query_layer.dtype == torch.float16 and query_layer.shape[2] >= 5000:
+        # split tensor for memory block limitation
+        # support fp16 and set input length threshold at 5000 for now
+        return True
+    elif query_layer.element_size()*bsz*n_head*seq_len*seq_len >= 4*1024**3:
+        # attn_weight size larger than memory block limitation 4GB
+        return True
+    return False
+
+
 def chatglm_rms_norm_forward(self, hidden_states):
     if hidden_states.device.type == "xpu" and not (self.training and hidden_states.requires_grad):
         import linear_q4_0
         x_2d = hidden_states.reshape(-1, hidden_states.size(-1)).contiguous()
         output = linear_q4_0.rms_norm(self.weight, x_2d, self.eps)
-        if 1 < x_2d.size(0) <= 64:   # may use XMX, need copy
-            output = output.clone()
         return output.reshape(hidden_states.shape)
 
     input_dtype = hidden_states.dtype
@@ -250,10 +263,27 @@ def chatglm2_quantized_attention_forward_8eb45c(
         else:
             key, value = key_layer, value_layer
 
-        if attention_mask is None:
-            context_layer = F.scaled_dot_product_attention(query_layer, key, value, is_causal=True)
+        if should_split_qkv_tensor(query_layer, batch_size, n_head, seq_len):
+            # split second dim to block size = 8
+            block_size = 8
+            query_split = torch.split(query_layer, block_size, dim=1)
+            key_split = torch.split(key, block_size, dim=1)
+            value_split = torch.split(value, block_size, dim=1)
+            results = []
+            for q, k, v in zip(query_split, key_split, value_split):
+                if attention_mask is None:
+                    result = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                else:
+                    result = F.scaled_dot_product_attention(q, k, v, attention_mask)
+                results.append(result)
+            context_layer = torch.cat(results, dim=1)
         else:
-            context_layer = F.scaled_dot_product_attention(query_layer, key, value, attention_mask)
+            if attention_mask is None:
+                context_layer = F.scaled_dot_product_attention(query_layer, key,
+                                                               value, is_causal=True)
+            else:
+                context_layer = F.scaled_dot_product_attention(query_layer, key,
+                                                               value, attention_mask)
         context_layer = context_layer.to(query_layer.dtype)
 
         if use_cache:
@@ -261,8 +291,7 @@ def chatglm2_quantized_attention_forward_8eb45c(
                                                  n_kv_head,
                                                  seq_len,
                                                  head_dim,
-                                                 query_layer.device,
-                                                 new_layout=True)
+                                                 query_layer.device)
             k_cache, v_cache = append_fp8_kv_cache(k_cache, v_cache, key_layer, value_layer)
     else:
         k_cache, v_cache = kv_cache
@@ -270,8 +299,7 @@ def chatglm2_quantized_attention_forward_8eb45c(
         v_cache = v_cache.permute(1, 2, 0, 3)
         # k_cache, v_cache's shape: [bs, n_kv_head, seq_len, head_dim]
 
-        k_cache, v_cache = append_fp8_kv_cache(k_cache, v_cache, key_layer, value_layer,
-                                               new_layout=True)
+        k_cache, v_cache = append_fp8_kv_cache(k_cache, v_cache, key_layer, value_layer)
 
         if attention_mask is not None:
             attention_mask = ~attention_mask
@@ -512,10 +540,23 @@ def core_attn_forward_8eb45c(query_layer, key_layer, value_layer, attention_mask
         query_layer = query_layer.permute(1, 2, 0, 3)
         L, S = query_layer.shape[2], key_layer.shape[2]
         if attention_mask is None and L == S:
-            context_layer = F.scaled_dot_product_attention(query_layer.to(key_layer.dtype),
-                                                           key_layer,
-                                                           value_layer,
-                                                           is_causal=True).to(key_layer.dtype)
+            batch_size, n_head, seq_len, head_dim = query_layer.shape
+            if should_split_qkv_tensor(query_layer, batch_size, n_head, seq_len):
+                # split second dim to block size = 8
+                block_size = 8
+                query_split = torch.split(query_layer.to(key_layer.dtype), block_size, dim=1)
+                key_split = torch.split(key_layer, block_size, dim=1)
+                value_split = torch.split(value_layer, block_size, dim=1)
+                results = []
+                for q, k, v in zip(query_split, key_split, value_split):
+                    result = F.scaled_dot_product_attention(q, k, v, is_causal=True).to(k.dtype)
+                    results.append(result)
+                context_layer = torch.cat(results, dim=1)
+            else:
+                context_layer = F.scaled_dot_product_attention(query_layer.to(key_layer.dtype),
+                                                               key_layer,
+                                                               value_layer,
+                                                               is_causal=True).to(key_layer.dtype)
         else:
             if use_esimd_sdp(query_layer.shape[2], key_layer.shape[2],
                              query_layer.shape[-1], query_layer):

@@ -23,12 +23,12 @@ from ipex_llm.transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 
 # you could tune the prompt based on your own model,
-# here the prompt tuning refers to https://huggingface.co/internlm/internlm-chat-7b-8k/blob/main/modeling_internlm.py#L768
+# here the prompt tuning refers to https://huggingface.co/internlm/internlm-chat-7b/blob/main/modeling_internlm.py#L1053
 INTERNLM_PROMPT_FORMAT = "<|User|>:{prompt}\n<|Bot|>:"
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Predict Tokens using `generate()` API for InternLM model')
-    parser.add_argument('--repo-id-or-model-path', type=str, default="internlm/internlm-chat-7b-8k",
+    parser.add_argument('--repo-id-or-model-path', type=str, default="internlm/internlm-chat-7b",
                         help='The huggingface repo id for the InternLM model to be downloaded'
                              ', or the path to the huggingface checkpoint folder')
     parser.add_argument('--prompt', type=str, default="AI是什么？",
@@ -57,7 +57,7 @@ if __name__ == '__main__':
         # if your selected model is capable of utilizing previous key/value attentions
         # to enhance decoding speed, but has `"use_cache": false` in its model config,
         # it is important to set `use_cache=True` explicitly in the `generate` function
-        # to obtain optimal performance with BigDL-LLM INT4 optimizations
+        # to obtain optimal performance with IPEX-LLM INT4 optimizations
         output = model.generate(input_ids,
                                 max_new_tokens=args.n_predict)
         end = time.time()

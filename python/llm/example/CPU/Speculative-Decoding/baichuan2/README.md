@@ -9,7 +9,7 @@ In the example [speculative.py](./speculative.py), we show a basic use case for 
 ### 1. Install
 We suggest using conda to manage environment:
 ```bash
-conda create -n llm python=3.9
+conda create -n llm python=3.11
 conda activate llm
 pip install --pre --upgrade ipex-llm[all]
 pip install intel_extension_for_pytorch==2.1.0
@@ -73,7 +73,7 @@ python -m pip install oneccl_bind_pt==2.2.0 --extra-index-url https://pytorch-ex
 # if there is any installation problem for oneccl_binding, you can also find suitable index url at "https://pytorch-extension.intel.com/release-whl/stable/cpu/cn/" or "https://developer.intel.com/ipex-whl-stable-cpu" according to your environment.
 
 # Install other dependencies
-pip install -r requirements.txt
+python -m pip install transformers==4.36.2 transformers-stream-generator
 ```
 
 #### 4.2 Run Baichuan2 Models with IPEX

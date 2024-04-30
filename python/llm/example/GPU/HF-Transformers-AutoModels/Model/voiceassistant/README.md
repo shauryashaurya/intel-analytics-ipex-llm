@@ -12,10 +12,11 @@ In the example [generate.py](./generate.py), we show a basic use case for a Whis
 #### 1.1 Installation on Linux
 We suggest using conda to manage environment:
 ```bash
-conda create -n llm python=3.9
+conda create -n llm python=3.11
 conda activate llm
 # below command will install intel_extension_for_pytorch==2.1.10+xpu as default
 pip install --pre --upgrade ipex-llm[xpu] --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+
 pip install librosa soundfile datasets
 pip install accelerate
 pip install SpeechRecognition sentencepiece colorama
@@ -26,27 +27,31 @@ pip install PyAudio inquirer sounddevice
 #### 1.2 Installation on Windows
 We suggest using conda to manage environment:
 ```bash
-conda create -n llm python=3.9 libuv
+conda create -n llm python=3.11 libuv
 conda activate llm
+# below command will use pip to install the Intel oneAPI Base Toolkit 2024.0
+pip install dpcpp-cpp-rt==2024.0.2 mkl-dpcpp==2024.0.0 onednn==2024.0.0
+
 # below command will install intel_extension_for_pytorch==2.1.10+xpu as default
 pip install --pre --upgrade ipex-llm[xpu] --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+
 pip install librosa soundfile datasets
 pip install accelerate
 pip install SpeechRecognition sentencepiece colorama
 pip install PyAudio inquirer
 ```
 
-### 2. Configures OneAPI environment variables
-#### 2.1 Configurations for Linux
+### 2. Configures OneAPI environment variables for Linux
+
+> [!NOTE]
+> Skip this step if you are running on Windows.
+
+This is a required step on Linux for APT or offline installed oneAPI. Skip this step for PIP-installed oneAPI.
+
 ```bash
 source /opt/intel/oneapi/setvars.sh
 ```
 
-#### 2.2 Configurations for Windows
-```cmd
-call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
-```
-> Note: Please make sure you are using **CMD** (**Anaconda Prompt** if using conda) to run the command as PowerShell is not supported.
 ### 3. Runtime Configurations
 For optimal performance, it is recommended to set several environment variables. Please check out the suggestions based on your device.
 #### 3.1 Configurations for Linux
@@ -57,6 +62,7 @@ For optimal performance, it is recommended to set several environment variables.
 ```bash
 export USE_XETLA=OFF
 export SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+export SYCL_CACHE_PERSISTENT=1
 ```
 
 </details>
@@ -68,9 +74,21 @@ export SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
 ```bash
 export LD_PRELOAD=${LD_PRELOAD}:${CONDA_PREFIX}/lib/libtcmalloc.so
 export SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+export SYCL_CACHE_PERSISTENT=1
 export ENABLE_SDP_FUSION=1
 ```
 > Note: Please note that `libtcmalloc.so` can be installed by `conda install -c conda-forge -y gperftools=2.10`.
+</details>
+
+<details>
+
+<summary>For Intel iGPU</summary>
+
+```bash
+export SYCL_CACHE_PERSISTENT=1
+export BIGDL_LLM_XMX_DISABLED=1
+```
+
 </details>
 
 #### 3.2 Configurations for Windows
@@ -87,7 +105,7 @@ set BIGDL_LLM_XMX_DISABLED=1
 
 <details>
 
-<summary>For Intel Arc™ A300-Series or Pro A60</summary>
+<summary>For Intel Arc™ A-Series Graphics</summary>
 
 ```cmd
 set SYCL_CACHE_PERSISTENT=1
@@ -95,15 +113,8 @@ set SYCL_CACHE_PERSISTENT=1
 
 </details>
 
-<details>
-
-<summary>For other Intel dGPU Series</summary>
-
-There is no need to set further environment variables.
-
-</details>
-
-> Note: For the first time that each model runs on Intel iGPU/Intel Arc™ A300-Series or Pro A60, it may take several minutes to compile.
+> [!NOTE]
+> For the first time that each model runs on Intel iGPU/Intel Arc™ A300-Series or Pro A60, it may take several minutes to compile.
 ### 4. Running examples
 
 ```
@@ -163,7 +174,7 @@ frame_data = np.frombuffer(audio.frame_data, np.int16).flatten().astype(np.float
 #### Sample Output
 ```bash
 (llm) ipex@ipex-llm:~/Documents/voiceassistant$ python generate.py --llama2-repo-id-or-model-path /mnt/windows/demo/models/Llama-2-7b-chat-hf --whisper-repo-id-or-model-path /mnt/windows/demo/models/whisper-medium
-/home/ipex/anaconda3/envs/llm/lib/python3.9/site-packages/torchvision/io/image.py:13: UserWarning: Failed to load image Python extension: ''If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+/home/ipex/anaconda3/envs/llm/lib/python3.11/site-packages/torchvision/io/image.py:13: UserWarning: Failed to load image Python extension: ''If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
   warn(
 
 [?] Which microphone do you choose?: Default
@@ -189,11 +200,11 @@ Extracting data files: 100%|█████████████████�
 Generating validation split: 73 examples [00:00, 5328.37 examples/s]
 Converting and loading models...
 Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████████| 3/3 [00:09<00:00,  3.04s/it]
-/home/ipex/anaconda3/envs/yina-llm/lib/python3.9/site-packages/transformers/generation/configuration_utils.py:362: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
+/home/ipex/anaconda3/envs/yina-llm/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:362: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
   warnings.warn(
-/home/ipex/anaconda3/envs/yina-llm/lib/python3.9/site-packages/transformers/generation/configuration_utils.py:367: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
+/home/ipex/anaconda3/envs/yina-llm/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:367: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
   warnings.warn(
-/home/ipex/anaconda3/envs/yina-llm/lib/python3.9/site-packages/transformers/generation/utils.py:1411: UserWarning: You have modified the pretrained model configuration to control generation. This is a deprecated strategy to control generation and will be removed soon, in a future version. Please use a generation configuration file (see https://huggingface.co/docs/transformers/main_classes/text_generation )
+/home/ipex/anaconda3/envs/yina-llm/lib/python3.11/site-packages/transformers/generation/utils.py:1411: UserWarning: You have modified the pretrained model configuration to control generation. This is a deprecated strategy to control generation and will be removed soon, in a future version. Please use a generation configuration file (see https://huggingface.co/docs/transformers/main_classes/text_generation )
   warnings.warn(
 Calibrating...
 Listening now...

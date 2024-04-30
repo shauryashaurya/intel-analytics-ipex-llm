@@ -57,7 +57,7 @@ from transformers.models.qwen2.modeling_qwen2 import Qwen2Model, apply_rotary_po
 from transformers.models.qwen2.modeling_qwen2 import _prepare_4d_causal_attention_mask_for_sdpa
 from transformers.models.qwen2.modeling_qwen2 import _prepare_4d_causal_attention_mask
 from transformers.modeling_outputs import BaseModelOutputWithPast
-from ipex_llm.transformers.models.utils import decoding_fast_path_qtype_check
+from ipex_llm.transformers.models.utils import use_decoding_fast_path
 
 try:
     from transformers.cache_utils import Cache, DynamicCache
@@ -69,7 +69,9 @@ from transformers import logging
 
 logger = logging.get_logger(__name__)
 
-KV_CACHE_ALLOC_BLOCK_LENGTH = 256
+import os
+
+KV_CACHE_ALLOC_BLOCK_LENGTH = int(os.environ.get("KV_CACHE_ALLOC_BLOCK_LENGTH", 256))
 
 
 def should_use_fuse_rope(self, query_states, position_ids):
@@ -141,7 +143,8 @@ def qwen2_model_forward_internal(
     elif inputs_embeds is not None:
         batch_size, seq_length, _ = inputs_embeds.shape
     else:
-        invalidInputError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
+        invalidInputError(False,
+                          "You have to specify either decoder_input_ids or decoder_inputs_embeds")
 
     if self.gradient_checkpointing and self.training:
         if use_cache:
@@ -355,8 +358,7 @@ def qwen2_attention_forward_quantized(
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
         key_states, value_states = past_key_value.update(key_states, value_states,
-                                                         self.layer_idx, cache_kwargs,
-                                                         new_layout=True)
+                                                         self.layer_idx, cache_kwargs)
 
     if q_len == 1 and query_states.device.type == 'xpu' and not self.training \
             and not hidden_states.requires_grad:
@@ -432,9 +434,10 @@ def qwen2_attention_forward_origin(
     device = hidden_states.device
 
     enough_kv_room = is_enough_kv_cache_room_4_36(past_key_value, self.layer_idx)
-    qtype_check = decoding_fast_path_qtype_check(self.q_proj)
-    decoding_fast_path = (qtype_check and use_fuse_rope
-                          and enough_kv_room and bsz * q_len == 1)
+    decoding_fast_path = use_decoding_fast_path(self.q_proj,
+                                                use_fuse_rope,
+                                                enough_kv_room,
+                                                bsz * q_len)
     if decoding_fast_path:
         hidden_states = hidden_states.view(1, -1)
         cache_k = past_key_value.key_cache[self.layer_idx]
@@ -601,9 +604,10 @@ def qwen2_sdpa_attention_forward(
     device = hidden_states.device
 
     enough_kv_room = is_enough_kv_cache_room_4_36(past_key_value, self.layer_idx)
-    qtype_check = decoding_fast_path_qtype_check(self.q_proj)
-    decoding_fast_path = (qtype_check and use_fuse_rope
-                          and enough_kv_room and bsz * q_len == 1)
+    decoding_fast_path = use_decoding_fast_path(self.q_proj,
+                                                use_fuse_rope,
+                                                enough_kv_room,
+                                                bsz * q_len)
     if decoding_fast_path:
         hidden_states = hidden_states.view(1, -1)
         cache_k = past_key_value.key_cache[self.layer_idx]
